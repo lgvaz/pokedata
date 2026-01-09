@@ -7,6 +7,8 @@ from pokedata.config import (
     ConfigError,
     _substitute_env_vars,
     _merge_config,
+    load_config_structure,
+    resolve_config_variables,
     load_config,
 )
 
@@ -14,78 +16,68 @@ from pokedata.config import (
 class TestSubstituteEnvVars:
     """Tests for _substitute_env_vars function."""
 
-    def test_stage_specific_env_var(self, monkeypatch):
-        """Test that stage-specific env vars are substituted."""
-        monkeypatch.setenv("CVAT_USERNAME_DEV", "dev_user")
-        result = _substitute_env_vars("${CVAT_USERNAME}", "dev")
-        assert result == "dev_user"
+    def test_simple_substitution(self):
+        """Test that variables are substituted from provided dict."""
+        variables = {"CVAT_USERNAME": "test_user"}
+        result = _substitute_env_vars("${CVAT_USERNAME}", variables)
+        assert result == "test_user"
 
-    def test_generic_fallback_env_var(self, monkeypatch):
-        """Test that generic env vars are used as fallback."""
-        monkeypatch.setenv("CVAT_USERNAME", "generic_user")
-        result = _substitute_env_vars("${CVAT_USERNAME}", "prod")
-        assert result == "generic_user"
-
-    def test_stage_specific_precedence(self, monkeypatch):
-        """Test that stage-specific env vars take precedence over generic."""
-        monkeypatch.setenv("CVAT_USERNAME_DEV", "dev_user")
-        monkeypatch.setenv("CVAT_USERNAME", "generic_user")
-        result = _substitute_env_vars("${CVAT_USERNAME}", "dev")
-        assert result == "dev_user"
-
-    def test_error_when_env_var_missing(self):
-        """Test that missing env vars raise ConfigError."""
+    def test_error_when_var_missing(self):
+        """Test that missing variables raise ConfigError."""
+        variables = {}
         with pytest.raises(
             ConfigError, match="Environment variable 'MISSING_VAR' not found"
         ):
-            _substitute_env_vars("${MISSING_VAR}", "dev")
+            _substitute_env_vars("${MISSING_VAR}", variables)
 
-    def test_multiple_substitutions(self, monkeypatch):
-        """Test multiple env var substitutions in one string."""
-        monkeypatch.setenv("VAR1", "value1")
-        monkeypatch.setenv("VAR2", "value2")
-        result = _substitute_env_vars("${VAR1} and ${VAR2}", "dev")
+    def test_multiple_substitutions(self):
+        """Test multiple variable substitutions in one string."""
+        variables = {"VAR1": "value1", "VAR2": "value2"}
+        result = _substitute_env_vars("${VAR1} and ${VAR2}", variables)
         assert result == "value1 and value2"
 
-    def test_nested_dict_substitution(self, monkeypatch):
-        """Test env var substitution in nested dictionaries."""
-        monkeypatch.setenv("CVAT_USERNAME_DEV", "dev_user")
+    def test_nested_dict_substitution(self):
+        """Test variable substitution in nested dictionaries."""
+        variables = {"CVAT_USERNAME": "test_user"}
         config = {
             "cvat": {
                 "username": "${CVAT_USERNAME}",
                 "url": "https://example.com",
             }
         }
-        result = _substitute_env_vars(config, "dev")
-        assert result["cvat"]["username"] == "dev_user"
+        result = _substitute_env_vars(config, variables)
+        assert result["cvat"]["username"] == "test_user"
         assert result["cvat"]["url"] == "https://example.com"
 
-    def test_list_substitution(self, monkeypatch):
-        """Test env var substitution in lists."""
-        monkeypatch.setenv("VAR1", "value1")
-        monkeypatch.setenv("VAR2", "value2")
+    def test_list_substitution(self):
+        """Test variable substitution in lists."""
+        variables = {"VAR1": "value1", "VAR2": "value2"}
         config = ["${VAR1}", "${VAR2}", "static"]
-        result = _substitute_env_vars(config, "dev")
+        result = _substitute_env_vars(config, variables)
         assert result == ["value1", "value2", "static"]
 
     def test_non_string_values_pass_through(self):
         """Test that non-string values pass through unchanged."""
-        assert _substitute_env_vars(42, "dev") == 42
-        assert _substitute_env_vars(True, "dev") is True
-        assert _substitute_env_vars(None, "dev") is None
+        variables = {}
+        assert _substitute_env_vars(42, variables) == 42
+        assert _substitute_env_vars(True, variables) is True
+        assert _substitute_env_vars(None, variables) is None
 
     def test_empty_string(self):
         """Test that empty strings are handled correctly."""
-        result = _substitute_env_vars("", "dev")
+        variables = {}
+        result = _substitute_env_vars("", variables)
         assert result == ""
 
     def test_no_placeholders(self):
         """Test string without placeholders."""
-        result = _substitute_env_vars("plain string", "dev")
+        variables = {}
+        result = _substitute_env_vars("plain string", variables)
         assert result == "plain string"
 
-    def test_error_in_nested_dict(self, monkeypatch):
-        """Test that missing env var in nested dict raises ConfigError."""
+    def test_error_in_nested_dict(self):
+        """Test that missing variable in nested dict raises ConfigError."""
+        variables = {}
         config = {
             "cvat": {
                 "username": "${CVAT_USERNAME}",
@@ -94,23 +86,16 @@ class TestSubstituteEnvVars:
         with pytest.raises(
             ConfigError, match="Environment variable 'CVAT_USERNAME' not found"
         ):
-            _substitute_env_vars(config, "dev")
+            _substitute_env_vars(config, variables)
 
     def test_error_in_list(self):
-        """Test that missing env var in list raises ConfigError."""
+        """Test that missing variable in list raises ConfigError."""
+        variables = {}
         config = ["${MISSING_VAR}", "static"]
         with pytest.raises(
             ConfigError, match="Environment variable 'MISSING_VAR' not found"
         ):
-            _substitute_env_vars(config, "dev")
-
-    def test_error_message_includes_both_attempts(self):
-        """Test that error message shows both stage-specific and generic attempts."""
-        with pytest.raises(ConfigError) as exc_info:
-            _substitute_env_vars("${VAR_NAME}", "dev")
-        error_msg = str(exc_info.value)
-        assert "VAR_NAME_DEV" in error_msg
-        assert "VAR_NAME" in error_msg
+            _substitute_env_vars(config, variables)
 
 
 class TestMergeConfig:
@@ -187,164 +172,185 @@ class TestMergeConfig:
         assert result["level1"]["level2"]["other"] == "base_other"
 
 
-class TestLoadConfig:
-    """Tests for load_config function."""
+class TestLoadConfigStructure:
+    """Tests for load_config_structure function."""
 
     def test_successful_load(self, tmp_path):
-        """Test successful loading of config with base and stage."""
+        """Test successful loading of config structure."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
             """
 datasets:
   structure: coco
-
-stages:
-  dev:
-    cvat:
-      url: https://dev.example.com
-      username: dev_user
-    datasets:
-      output_dir: data/dev
-  prod:
-    cvat:
-      url: https://prod.example.com
-      username: prod_user
-    datasets:
-      output_dir: data/prod
+cvat:
+  url: https://example.com
+  username: test_user
 """
         )
-        result = load_config(config_file, "dev")
+        result = load_config_structure(config_file)
         assert result["datasets"]["structure"] == "coco"
-        assert result["cvat"]["url"] == "https://dev.example.com"
-        assert result["cvat"]["username"] == "dev_user"
-        assert result["datasets"]["output_dir"] == "data/dev"
-        assert result["_stage"] == "dev"
+        assert result["cvat"]["url"] == "https://example.com"
+        assert result["cvat"]["username"] == "test_user"
 
     def test_missing_file(self, tmp_path):
         """Test that missing config file raises ConfigError."""
         missing_file = tmp_path / "missing.yaml"
         with pytest.raises(ConfigError, match="Configuration file not found"):
-            load_config(missing_file, "dev")
+            load_config_structure(missing_file)
 
     def test_invalid_yaml(self, tmp_path):
         """Test that invalid YAML raises ConfigError."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("invalid: yaml: content: [")
         with pytest.raises(ConfigError, match="Failed to parse YAML"):
-            load_config(config_file, "dev")
-
-    def test_missing_stage(self, tmp_path):
-        """Test that missing stage raises ConfigError."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages:
-  dev:
-    key: value
-"""
-        )
-        with pytest.raises(ConfigError, match="Stage 'prod' not found"):
-            load_config(config_file, "prod")
+            load_config_structure(config_file)
 
     def test_config_not_dict(self, tmp_path):
         """Test that non-dict YAML raises ConfigError."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("- item1\n- item2")
         with pytest.raises(ConfigError, match="must contain a YAML dictionary"):
-            load_config(config_file, "dev")
+            load_config_structure(config_file)
 
-    def test_stages_not_dict(self, tmp_path):
-        """Test that stages not being a dict raises ConfigError."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages: not_a_dict
-"""
-        )
-        with pytest.raises(ConfigError, match="'stages' must be a dictionary"):
-            load_config(config_file, "dev")
 
-    def test_stage_config_not_dict(self, tmp_path):
-        """Test that stage config not being a dict raises ConfigError."""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages:
-  dev: not_a_dict
-"""
-        )
-        with pytest.raises(
-            ConfigError, match="Stage 'dev' configuration must be a dictionary"
-        ):
-            load_config(config_file, "dev")
+class TestResolveConfigVariables:
+    """Tests for resolve_config_variables function."""
 
-    def test_env_var_substitution_in_load(self, tmp_path, monkeypatch):
-        """Test that env vars are substituted when loading config."""
-        monkeypatch.setenv("CVAT_USERNAME_DEV", "env_dev_user")
+    def test_resolves_from_env_vars(self, tmp_path, monkeypatch):
+        """Test that variables are resolved from environment variables."""
+        monkeypatch.setenv("CVAT_USERNAME", "env_user")
         monkeypatch.setenv("CVAT_PASSWORD", "env_password")
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages:
-  dev:
-    cvat:
-      username: ${CVAT_USERNAME}
-      password: ${CVAT_PASSWORD}
-"""
-        )
-        result = load_config(config_file, "dev")
-        assert result["cvat"]["username"] == "env_dev_user"
+        config = {
+            "cvat": {
+                "username": "${CVAT_USERNAME}",
+                "password": "${CVAT_PASSWORD}",
+            }
+        }
+        result = resolve_config_variables(config)
+        assert result["cvat"]["username"] == "env_user"
         assert result["cvat"]["password"] == "env_password"
 
-    def test_base_config_merged_with_stage(self, tmp_path):
-        """Test that base config is merged with stage config."""
+    def test_resolves_from_credentials_file(self, tmp_path):
+        """Test that variables are resolved from credentials file."""
+        credentials_file = tmp_path / "credentials.yaml"
+        credentials_file.write_text(
+            """
+CVAT_USERNAME: file_user
+CVAT_PASSWORD: file_password
+"""
+        )
+        config = {
+            "cvat": {
+                "username": "${CVAT_USERNAME}",
+                "password": "${CVAT_PASSWORD}",
+            }
+        }
+        result = resolve_config_variables(config, credentials_file)
+        assert result["cvat"]["username"] == "file_user"
+        assert result["cvat"]["password"] == "file_password"
+
+    def test_env_vars_override_credentials(self, tmp_path, monkeypatch):
+        """Test that environment variables override credentials file."""
+        monkeypatch.setenv("CVAT_USERNAME", "env_user")
+        credentials_file = tmp_path / "credentials.yaml"
+        credentials_file.write_text("CVAT_USERNAME: file_user\n")
+        config = {"cvat": {"username": "${CVAT_USERNAME}"}}
+        result = resolve_config_variables(config, credentials_file)
+        assert result["cvat"]["username"] == "env_user"
+
+    def test_missing_credentials_file_is_ok(self, tmp_path, monkeypatch):
+        """Test that missing credentials file is handled gracefully."""
+        monkeypatch.setenv("CVAT_USERNAME", "env_user")
+        missing_credentials = tmp_path / "missing.yaml"
+        config = {"cvat": {"username": "${CVAT_USERNAME}"}}
+        result = resolve_config_variables(config, missing_credentials)
+        assert result["cvat"]["username"] == "env_user"
+
+    def test_error_on_missing_var(self, tmp_path):
+        """Test that missing variable raises ConfigError."""
+        config = {"cvat": {"username": "${MISSING_VAR}"}}
+        with pytest.raises(
+            ConfigError, match="Environment variable 'MISSING_VAR' not found"
+        ):
+            resolve_config_variables(config)
+
+    def test_credentials_non_string_value_raises_error(self, tmp_path):
+        """Test that non-string credential values raise ConfigError."""
+        credentials_file = tmp_path / "credentials.yaml"
+        credentials_file.write_text("CVAT_USERNAME: 12345\n")
+        config = {"cvat": {"username": "${CVAT_USERNAME}"}}
+        with pytest.raises(
+            ConfigError, match="Credentials value for CVAT_USERNAME have to be a string"
+        ):
+            resolve_config_variables(config, credentials_file)
+
+
+class TestLoadConfig:
+    """Tests for load_config function."""
+
+    def test_successful_load(self, tmp_path):
+        """Test successful loading of config."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
             """
 datasets:
   structure: coco
-  default_format: json
-
-stages:
-  dev:
-    datasets:
-      output_dir: data/dev
+cvat:
+  url: https://example.com
+  username: test_user
 """
         )
-        result = load_config(config_file, "dev")
+        result = load_config(config_file)
         assert result["datasets"]["structure"] == "coco"
-        assert result["datasets"]["default_format"] == "json"
-        assert result["datasets"]["output_dir"] == "data/dev"
+        assert result["cvat"]["url"] == "https://example.com"
+        assert result["cvat"]["username"] == "test_user"
 
-    def test_stage_parameter_required(self, tmp_path):
-        """Test that stage parameter is required."""
+    def test_load_with_credentials(self, tmp_path):
+        """Test loading config with credentials file."""
         config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages:
-  dev:
-    key: value
-"""
-        )
-        result = load_config(config_file, "dev")
-        assert result["_stage"] == "dev"
-        assert result["key"] == "value"
+        config_file.write_text("cvat:\n  username: ${CVAT_USERNAME}\n")
+        credentials_file = tmp_path / "credentials.yaml"
+        credentials_file.write_text("CVAT_USERNAME: cred_user\n")
+        result = load_config(config_file, credentials_file)
+        assert result["cvat"]["username"] == "cred_user"
 
-    def test_load_config_raises_error_on_missing_env_var(self, tmp_path):
-        """Test that load_config raises ConfigError when env var is missing."""
+    def test_load_with_env_vars(self, tmp_path, monkeypatch):
+        """Test loading config with environment variables."""
+        monkeypatch.setenv("CVAT_USERNAME", "env_user")
         config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            """
-stages:
-  dev:
-    cvat:
-      username: ${MISSING_VAR}
-"""
-        )
-        with pytest.raises(
-            ConfigError, match="Environment variable 'MISSING_VAR' not found"
-        ):
-            load_config(config_file, "dev")
+        config_file.write_text("cvat:\n  username: ${CVAT_USERNAME}\n")
+        result = load_config(config_file)
+        assert result["cvat"]["username"] == "env_user"
+
+    def test_env_vars_override_credentials(self, tmp_path, monkeypatch):
+        """Test that env vars override credentials in load_config."""
+        monkeypatch.setenv("CVAT_USERNAME", "env_user")
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("cvat:\n  username: ${CVAT_USERNAME}\n")
+        credentials_file = tmp_path / "credentials.yaml"
+        credentials_file.write_text("CVAT_USERNAME: cred_user\n")
+        result = load_config(config_file, credentials_file)
+        assert result["cvat"]["username"] == "env_user"
+
+    def test_missing_file(self, tmp_path):
+        """Test that missing config file raises ConfigError."""
+        missing_file = tmp_path / "missing.yaml"
+        with pytest.raises(ConfigError, match="Configuration file not found"):
+            load_config(missing_file)
+
+    def test_invalid_yaml(self, tmp_path):
+        """Test that invalid YAML raises ConfigError."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("invalid: yaml: content: [")
+        with pytest.raises(ConfigError, match="Failed to parse YAML"):
+            load_config(config_file)
+
+    def test_config_not_dict(self, tmp_path):
+        """Test that non-dict YAML raises ConfigError."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("- item1\n- item2")
+        with pytest.raises(ConfigError, match="must contain a YAML dictionary"):
+            load_config(config_file)
 
 
 class TestDirectConfigAccess:
