@@ -1,0 +1,25 @@
+# Base configuration (shared across all stages)
+datasets:
+  structure: coco
+  default_format: json
+
+dvc:
+  repo_path: "."
+
+# Stage-specific configurations
+stages:
+  dev:
+    cvat:
+      url: "https://cvat-dev.example.com"
+      username: "${CVAT_USERNAME}"
+      password: "${CVAT_PASSWORD}"
+    datasets:
+      output_dir: "data/dev"
+  
+  prod:
+    cvat:
+      url: "https://cvat.example.com"
+      username: "${CVAT_USERNAME}"
+      password: "${CVAT_PASSWORD}"
+    datasets:
+      output_dir: "data/prod"
