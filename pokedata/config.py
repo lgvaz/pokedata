@@ -143,29 +143,3 @@ def load_config(config_path: Path, stage: str) -> ConfigDict:
     merged_config["_stage"] = stage
 
     return merged_config
-
-
-def get_config_value(config: ConfigDict, key_path: str) -> Any:
-    """
-    Get a configuration value using dot-notation path.
-
-    Args:
-        config: Configuration dictionary
-        key_path: Dot-separated path (e.g., 'cvat.url', 'datasets.output_dir')
-
-    Returns:
-        Configuration value
-
-    Raises:
-        ConfigError: If the key path is not found in the configuration
-    """
-    keys = key_path.split(".")
-    value: Any = config
-
-    for key in keys:
-        if isinstance(value, dict) and key in value:
-            value = value[key]
-        else:
-            raise ConfigError(f"Configuration key '{key_path}' not found")
-
-    return value

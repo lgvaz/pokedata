@@ -8,7 +8,6 @@ from pokedata.config import (
     _substitute_env_vars,
     _merge_config,
     load_config,
-    get_config_value,
 )
 
 
@@ -348,16 +347,16 @@ stages:
             load_config(config_file, "dev")
 
 
-class TestGetConfigValue:
-    """Tests for get_config_value function."""
+class TestDirectConfigAccess:
+    """Tests for direct dictionary access to configuration."""
 
     def test_simple_key(self):
         """Test getting a simple top-level key."""
         config = {"key": "value"}
-        assert get_config_value(config, "key") == "value"
+        assert config["key"] == "value"
 
     def test_nested_key(self):
-        """Test getting a nested key using dot notation."""
+        """Test getting a nested key using direct dictionary access."""
         config = {
             "cvat": {
                 "url": "https://example.com",
@@ -366,34 +365,22 @@ class TestGetConfigValue:
                 },
             }
         }
-        assert get_config_value(config, "cvat.url") == "https://example.com"
-        assert get_config_value(config, "cvat.auth.username") == "user"
+        assert config["cvat"]["url"] == "https://example.com"
+        assert config["cvat"]["auth"]["username"] == "user"
 
-    def test_missing_key_raises_error(self):
-        """Test that missing key raises ConfigError."""
+    def test_missing_key_raises_keyerror(self):
+        """Test that missing key raises KeyError."""
         config = {"key": "value"}
-        with pytest.raises(ConfigError, match="Configuration key 'missing' not found"):
-            get_config_value(config, "missing")
+        with pytest.raises(KeyError):
+            _ = config["missing"]
 
-    def test_missing_intermediate_key_raises_error(self):
-        """Test that missing intermediate key raises ConfigError."""
+    def test_missing_intermediate_key_raises_keyerror(self):
+        """Test that missing intermediate key raises KeyError."""
         config = {"cvat": {"url": "https://example.com"}}
-        with pytest.raises(ConfigError, match="Configuration key 'cvat.missing' not found"):
-            get_config_value(config, "cvat.missing")
-        with pytest.raises(ConfigError, match="Configuration key 'missing.key' not found"):
-            get_config_value(config, "missing.key")
-
-    def test_empty_key_path_raises_error(self):
-        """Test that empty key path raises ConfigError."""
-        config = {"key": "value"}
-        with pytest.raises(ConfigError, match="Configuration key '' not found"):
-            get_config_value(config, "")
-
-    def test_missing_key_raises_error_no_default(self):
-        """Test that missing key raises ConfigError (no default parameter)."""
-        config = {"key": "value"}
-        with pytest.raises(ConfigError, match="Configuration key 'missing' not found"):
-            get_config_value(config, "missing")
+        with pytest.raises(KeyError):
+            _ = config["cvat"]["missing"]
+        with pytest.raises(KeyError):
+            _ = config["missing"]["key"]
 
     def test_deeply_nested_key(self):
         """Test getting a deeply nested key."""
@@ -406,13 +393,13 @@ class TestGetConfigValue:
                 }
             }
         }
-        assert get_config_value(config, "level1.level2.level3.level4") == "deep_value"
+        assert config["level1"]["level2"]["level3"]["level4"] == "deep_value"
 
-    def test_non_dict_intermediate_value_raises_error(self):
-        """Test that non-dict intermediate value raises ConfigError."""
+    def test_non_dict_intermediate_value_raises_typeerror(self):
+        """Test that accessing non-dict intermediate value raises TypeError."""
         config = {"key": "string_value"}
-        with pytest.raises(ConfigError, match="Configuration key 'key.nested' not found"):
-            get_config_value(config, "key.nested")
+        with pytest.raises(TypeError):
+            _ = config["key"]["nested"]
 
 
 class TestConfigError:
