@@ -8,6 +8,5 @@ dvc:
   repo_path: "."
 
 cvat:
-  url: "https://cvat.example.com"
-  username: "${CVAT_USERNAME}"
-  password: "${CVAT_PASSWORD}"
+  url: "https://staging-grading.agscard.com/api/v1"
+  auth: "${CVAT_AUTH}"
