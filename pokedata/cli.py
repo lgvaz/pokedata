@@ -35,7 +35,7 @@ def download_task(
         auth = config["cvat"]["auth"]
 
         # Create CVAT client and download task
-        output_dir = Path(output_dir or config["datasets"]["output_dir"])
+        output_dir = Path(output_dir or config["datasets"]["output_dir"]) / "cvat_raw"
         output_dir.mkdir(parents=True, exist_ok=True)
         client = CVATClient(api_url=api_url, auth=auth)
         result_path = client.download_task(
