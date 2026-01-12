@@ -25,7 +25,7 @@ def download_task(
     output_dir: Optional[Path] = typer.Option(
         None, help="Output directory (overrides config)"
     ),
-    format: str = typer.Option("COCO 1.0", help="Annotation format"),
+    format: str = typer.Option("LabelMe 3.0", help="Annotation format"),
 ) -> None:
     """Download a task's dataset from CVAT."""
     try:
