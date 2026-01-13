@@ -8,10 +8,11 @@ import pytest
 from pokedata.dataset_build import (
     DatasetBuildError,
     DatasetSplit,
+    HashSplitter,
+    RatioSplitPolicy,
     Record,
     build_dataset,
     compute_first_hash_byte,
-    stem_to_split,
 )
 
 
@@ -26,17 +27,33 @@ def test_compute_first_hash_byte():
 
 
 def test_stem_to_split():
-    """Test stem_to_split."""
-    # fix tests like above, no extension, only stem, results should be equal above
-    assert stem_to_split("test_image_0", 42) == DatasetSplit.TRAIN
-    assert stem_to_split("test_image_3", 42) == DatasetSplit.TRAIN
-    assert stem_to_split("test_image_4", 42) == DatasetSplit.TRAIN
-    assert stem_to_split("test_image_5", 42) == DatasetSplit.VAL
-    assert stem_to_split("test_image_7", 42) == DatasetSplit.TEST
+    """Test HashSplitter with RatioSplitPolicy."""
+    # Using the same splitter configuration that produces the expected results
+    # Based on hash scores: 0->0.0586, 3->0.7148, 4->0.4258, 5->0.8008, 7->0.9648
+    # We need train < 0.75, val < 0.9, test < 1.0
+    policy = RatioSplitPolicy(train=0.75, val=0.15, test=0.10)
+    splitter = HashSplitter(policy=policy, seed=42)
+
+    record_0 = Record(image_path=None, annotation_path=None, stem="test_image_0")
+    record_3 = Record(image_path=None, annotation_path=None, stem="test_image_3")
+    record_4 = Record(image_path=None, annotation_path=None, stem="test_image_4")
+    record_5 = Record(image_path=None, annotation_path=None, stem="test_image_5")
+    record_7 = Record(image_path=None, annotation_path=None, stem="test_image_7")
+
+    assert splitter.split(record_0) == DatasetSplit.TRAIN
+    assert splitter.split(record_3) == DatasetSplit.TRAIN
+    assert splitter.split(record_4) == DatasetSplit.TRAIN
+    assert splitter.split(record_5) == DatasetSplit.VAL
+    assert splitter.split(record_7) == DatasetSplit.TEST
 
 
 class TestBuildDatasetSuccess:
     """Tests for build_dataset function - success cases."""
+
+    def _get_splitter(self):
+        """Helper to create a splitter with the expected configuration."""
+        policy = RatioSplitPolicy(train=0.75, val=0.15, test=0.10)
+        return HashSplitter(policy=policy, seed=42)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_success_single_file(self, mock_get_files, tmp_path):
@@ -49,7 +66,8 @@ class TestBuildDatasetSuccess:
 
         mock_get_files.side_effect = [[image_path], [annotation_path]]
 
-        splits = build_dataset(dataset_path)
+        splitter = self._get_splitter()
+        splits = build_dataset(dataset_path, splitter)
 
         assert len(splits[DatasetSplit.TRAIN]) == 1
         assert len(splits[DatasetSplit.VAL]) == 0
@@ -85,7 +103,8 @@ class TestBuildDatasetSuccess:
 
         mock_get_files.side_effect = [image_paths, annotation_paths]
 
-        splits = build_dataset(dataset_path)
+        splitter = self._get_splitter()
+        splits = build_dataset(dataset_path, splitter)
 
         # Verify splits are correct
         assert len(splits[DatasetSplit.TRAIN]) == 3
@@ -108,7 +127,8 @@ class TestBuildDatasetSuccess:
 
         mock_get_files.side_effect = [[], []]
 
-        splits = build_dataset(dataset_path)
+        splitter = self._get_splitter()
+        splits = build_dataset(dataset_path, splitter)
 
         assert isinstance(splits, dict)
         assert DatasetSplit.TRAIN in splits
@@ -129,7 +149,8 @@ class TestBuildDatasetSuccess:
 
         mock_get_files.side_effect = [[image_path], [annotation_path]]
 
-        splits = build_dataset(dataset_path)
+        splitter = self._get_splitter()
+        splits = build_dataset(dataset_path, splitter)
 
         # Verify structure
         assert isinstance(splits, dict)
@@ -140,6 +161,11 @@ class TestBuildDatasetSuccess:
 
 class TestBuildDatasetErrors:
     """Tests for build_dataset function - error cases."""
+
+    def _get_splitter(self):
+        """Helper to create a splitter with the expected configuration."""
+        policy = RatioSplitPolicy(train=0.75, val=0.15, test=0.10)
+        return HashSplitter(policy=policy, seed=42)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_duplicate_images(self, mock_get_files, tmp_path):
@@ -154,8 +180,9 @@ class TestBuildDatasetErrors:
             [dataset_path / "test_image_0.xml"],
         ]
 
+        splitter = self._get_splitter()
         with pytest.raises(DatasetBuildError, match="Duplicate images found"):
-            build_dataset(dataset_path)
+            build_dataset(dataset_path, splitter)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_duplicate_annotations(self, mock_get_files, tmp_path):
@@ -170,8 +197,9 @@ class TestBuildDatasetErrors:
             [annotation_path, annotation_path],  # Duplicate XML files
         ]
 
+        splitter = self._get_splitter()
         with pytest.raises(DatasetBuildError, match="Duplicate annotations found"):
-            build_dataset(dataset_path)
+            build_dataset(dataset_path, splitter)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_missing_annotations(self, mock_get_files, tmp_path):
@@ -187,8 +215,9 @@ class TestBuildDatasetErrors:
             [dataset_path / "test_image_0.xml"],  # Only one annotation
         ]
 
+        splitter = self._get_splitter()
         with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path)
+            build_dataset(dataset_path, splitter)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_missing_images(self, mock_get_files, tmp_path):
@@ -204,8 +233,9 @@ class TestBuildDatasetErrors:
             ],  # Two annotations
         ]
 
+        splitter = self._get_splitter()
         with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path)
+            build_dataset(dataset_path, splitter)
 
     @patch("pokedata.dataset_build.pv.get_files")
     def test_build_dataset_name_mismatch(self, mock_get_files, tmp_path):
@@ -224,8 +254,9 @@ class TestBuildDatasetErrors:
             [annotation_path],
         ]
 
+        splitter = self._get_splitter()
         with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path)
+            build_dataset(dataset_path, splitter)
 
 
 class TestRecord:

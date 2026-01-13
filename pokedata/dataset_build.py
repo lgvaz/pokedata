@@ -1,20 +1,16 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Dict, List
 import polvo as pv
 import hashlib
+from abc import ABC, abstractmethod
 
 
 class DatasetBuildError(Exception):
     """Raised when dataset build fails."""
 
     pass
-
-
-class DatasetSplit(Enum):
-    TRAIN = "train"
-    VAL = "val"
-    TEST = "test"
 
 
 @dataclass
@@ -24,7 +20,85 @@ class Record:
     stem: str
 
 
-def build_dataset(dataset_path: Path) -> None:
+class DatasetSplit(Enum):
+    TRAIN = "train"
+    VAL = "val"
+    TEST = "test"
+
+
+@dataclass(frozen=True)
+class SplitScore:
+    score: float  # 0.0 <= score < 1.0
+
+    def __post_init__(self):
+        if not 0.0 <= self.score < 1.0:
+            raise ValueError("SplitScore must be in [0, 1)")
+
+
+class SplitPolicy(ABC):
+    @abstractmethod
+    def split(self, score: SplitScore) -> DatasetSplit: ...
+
+
+@dataclass(frozen=True)
+class RatioSplitPolicy(SplitPolicy):
+    train: float
+    val: float
+    test: float
+
+    def __post_init__(self):
+        total = self.train + self.val + self.test
+        if not abs(total - 1.0) < 1e-9:
+            raise ValueError(f"Split ratios must sum to 1.0, got {total}")
+
+        object.__setattr__(
+            self,
+            "_thresholds",
+            (
+                (self.train, DatasetSplit.TRAIN),
+                (self.train + self.val, DatasetSplit.VAL),
+                (1.0, DatasetSplit.TEST),
+            ),
+        )
+
+    def split(self, score: SplitScore) -> DatasetSplit:
+        for limit, split in self._thresholds:
+            if score.score < limit:
+                return split
+
+        raise RuntimeError("Unreachable")
+
+
+class Splitter(ABC):
+    @abstractmethod
+    def split(self, record: Record) -> DatasetSplit: ...
+
+
+def compute_first_hash_byte(stem: str, seed: int = 42) -> int:
+    """Compute the first byte of the hash of a filename stem"""
+    key = f"{seed}:{stem}".encode("utf-8")
+    return hashlib.sha256(key).digest()[0]
+
+
+def compute_hash_score(stem: str, seed: int) -> SplitScore:
+    """Compute the score for a filename stem"""
+    hash_byte = compute_first_hash_byte(stem, seed)
+    return SplitScore(score=hash_byte / 256.0)
+
+
+class HashSplitter(Splitter):
+    def __init__(self, policy: SplitPolicy, seed: int):
+        self.seed = seed
+        self.policy = policy
+
+    def split(self, record: Record) -> DatasetSplit:
+        split_score = compute_hash_score(record.stem, self.seed)
+        return self.policy.split(split_score)
+
+
+def build_dataset(
+    dataset_path: Path, splitter: Splitter
+) -> Dict[DatasetSplit, List[Record]]:
     """Build a dataset from a directory of images and annotations."""
     image_paths = pv.get_files(dataset_path, extensions=[".png"])
     annotation_paths = pv.get_files(dataset_path, extensions=[".xml"])
@@ -61,24 +135,7 @@ def build_dataset(dataset_path: Path) -> None:
             annotation_path=annotation_path,
             stem=stem,
         )
-        split = stem_to_split(record.stem)
+        split = splitter.split(record)
         splits[split].append(record)
 
     return splits
-
-
-def compute_first_hash_byte(stem: str, seed: int = 42) -> int:
-    """Compute the first byte of the hash of a filename stem"""
-    key = f"{seed}:{stem}".encode("utf-8")
-    return hashlib.sha256(key).digest()[0]  # 0–255
-
-
-def stem_to_split(stem: str, seed: int = 42) -> DatasetSplit:
-    """Convert a filename stem to a train/val/test split."""
-    b = compute_first_hash_byte(stem, seed)
-    if b < 204:  # 204 / 256 ≈ 0.80
-        return DatasetSplit.TRAIN
-    elif b < 230:  # 230 / 256 ≈ 0.90
-        return DatasetSplit.VAL
-    else:
-        return DatasetSplit.TEST
