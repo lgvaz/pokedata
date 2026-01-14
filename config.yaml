@@ -1,16 +1,11 @@
 # Configuration
 datasets:
-  structure: coco
-  default_format: json
   output_dir: "data"
   splits:
     seed: 42
     train: 0.8
     val: 0.1
     test: 0.1
-
-dvc:
-  repo_path: "."
 
 cvat:
   url: "https://staging-grading.agscard.com/api/v1"

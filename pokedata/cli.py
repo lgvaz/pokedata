@@ -1,45 +1,65 @@
 """CLI module for pokedata."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from loguru import logger
 import typer
 
-from pokedata.config import ConfigError, load_config
+from pokedata.config import ConfigDict, ConfigError, load_config
 from pokedata.cvat import CVATClient, CVATError
+from pokedata.dataset_cli import dataset_app
+from pokedata.dataset_layout import DatasetLayout
 
 app = typer.Typer()
+app.add_typer(dataset_app, name="dataset")
 
 
-@app.callback(invoke_without_command=True)
-def main() -> None:
-    """Main entry point for the CLI."""
-    pass
+@dataclass
+class CLIContext:
+    config: ConfigDict
+    dataset_layout: DatasetLayout
 
 
-@app.command()
-def download_task(
-    task_id: int,
+@app.callback()
+def main(
+    ctx: typer.Context,
     config_path: Path = typer.Option("config.yaml", help="Path to config file"),
     secrets_path: Path = typer.Option("secrets.yaml", help="Path to secrets file"),
     output_dir: Optional[Path] = typer.Option(
         None, help="Output directory (overrides config)"
     ),
+) -> None:
+    """Main entry point for the CLI."""
+    config = load_config(config_path, secrets_path)
+    if output_dir:
+        config["datasets"]["output_dir"] = output_dir
+
+    dataset_layout = DatasetLayout(Path(config["datasets"]["output_dir"]))
+
+    ctx.obj = CLIContext(config=config, dataset_layout=dataset_layout)
+
+
+@app.command()
+def download_task(
+    ctx: typer.Context,
+    task_id: int,
     format: str = typer.Option("LabelMe 3.0", help="Annotation format"),
 ) -> None:
     """Download a task's dataset from CVAT."""
     try:
-        config = load_config(config_path, secrets_path)
-
-        api_url = config["cvat"]["url"]
-        auth = config["cvat"]["auth"]
+        cli_context = ctx.obj
+        api_url = cli_context.config["cvat"]["url"]
+        auth = cli_context.config["cvat"]["auth"]
 
         # Create CVAT client and download task
-        output_dir = Path(output_dir or config["datasets"]["output_dir"]) / "cvat_raw"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        cli_context.dataset_layout.cvat_raw.mkdir(parents=True, exist_ok=True)
         client = CVATClient(api_url=api_url, auth=auth)
         result_path = client.download_task(
-            task_id=task_id, output_dir=output_dir, format=format
+            task_id=task_id,
+            output_dir=cli_context.dataset_layout.cvat_raw,
+            format=format,
         )
 
         typer.echo(f"✓ Task {task_id} downloaded successfully to: {result_path}")

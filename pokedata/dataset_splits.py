@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from abc import ABC, abstractmethod
 import hashlib
+from typing import Dict, List
 
 from pokedata.record import Record
 
@@ -59,8 +60,20 @@ class Splitter(ABC):
     @abstractmethod
     def split(self, record: Record) -> DatasetSplit: ...
 
+    def split_records(self, records: List[Record]) -> Dict[DatasetSplit, List[Record]]:
+        splits = {
+            split: [r for r in records if self.split(r) == split]
+            for split in DatasetSplit
+        }
+        if sum(len(split_records) for split_records in splits.values()) != len(records):
+            raise ValueError(
+                f"The sums of the splits are not equal to the total number of records: "
+                f"{sum(len(split_records) for split_records in splits.values())} != {len(records)}"
+            )
+        return splits
 
-def compute_first_hash_byte(stem: str, seed: int = 42) -> int:
+
+def compute_first_hash_byte(stem: str, seed: int) -> int:
     """Compute the first byte of the hash of a filename stem"""
     key = f"{seed}:{stem}".encode("utf-8")
     return hashlib.sha256(key).digest()[0]
