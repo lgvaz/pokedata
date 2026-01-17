@@ -1,275 +1,155 @@
-"""Tests for pokedata.dataset_build module."""
-
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from pokedata.record import Record
-from pokedata.dataset_splits import DatasetSplit, RatioSplitPolicy, HashSplitter
-from pokedata.dataset_build import DatasetBuildError, build_dataset
+from pokedata.dataset_build import (
+    DatasetBuildError,
+    build_dataset,
+    plan_dataset,
+    DatasetPlan,
+    RecordCopy,
+    execute_dataset_plan,
+    records_from_cvat_raw,
+)
+from pokedata.dataset_layout import DatasetLayout
+from pokedata.dataset_splits import DatasetSplit, StaticSplitter
 
 
-class TestBuildDatasetSuccess:
-    """Tests for build_dataset function - success cases."""
+def test_records_from_cvat_raw_single_task(tmp_path):
+    cvat_raw = tmp_path / "cvat_raw"
+    task_dir = cvat_raw / "task_123"
+    task_dir.mkdir(parents=True)
 
-    def _get_splitter(self):
-        """Helper to create a splitter with the expected configuration."""
-        policy = RatioSplitPolicy(train=0.75, val=0.15, test=0.10)
-        return HashSplitter(policy=policy, seed=42)
+    (task_dir / "x.png").write_bytes(b"x")
+    (task_dir / "x.xml").write_text("<xml />")
 
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_success_single_file(self, mock_get_files, tmp_path):
-        """Test successful dataset build with a single matching image/annotation pair."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
+    records, tasks = records_from_cvat_raw(cvat_raw)
 
-        image_path = dataset_path / "test_image_0.png"
-        annotation_path = dataset_path / "test_image_0.xml"
+    assert len(records) == 1
+    assert records[0].stem == "x"
+    assert records[0].image_path.name == "x.png"
+    assert records[0].annotation_path.name == "x.xml"
 
-        mock_get_files.side_effect = [[image_path], [annotation_path]]
-
-        splitter = self._get_splitter()
-        splits = build_dataset(dataset_path, splitter)
-
-        assert len(splits[DatasetSplit.TRAIN]) == 1
-        assert len(splits[DatasetSplit.VAL]) == 0
-        assert len(splits[DatasetSplit.TEST]) == 0
-
-        record = splits[DatasetSplit.TRAIN][0]
-        assert isinstance(record, Record)
-        assert record.image_path == image_path
-        assert record.annotation_path == annotation_path
-        assert record.stem == "test_image_0"
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_success_multiple_files(self, mock_get_files, tmp_path):
-        """Test successful dataset build with multiple matching image/annotation pairs."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        # Create paths for multiple files
-        image_paths = [
-            dataset_path / "test_image_0.png",
-            dataset_path / "test_image_3.png",
-            dataset_path / "test_image_4.png",
-            dataset_path / "test_image_5.png",
-            dataset_path / "test_image_7.png",
-        ]
-        annotation_paths = [
-            dataset_path / "test_image_0.xml",
-            dataset_path / "test_image_3.xml",
-            dataset_path / "test_image_4.xml",
-            dataset_path / "test_image_5.xml",
-            dataset_path / "test_image_7.xml",
-        ]
-
-        mock_get_files.side_effect = [image_paths, annotation_paths]
-
-        splitter = self._get_splitter()
-        splits = build_dataset(dataset_path, splitter)
-
-        # Verify splits are correct
-        assert len(splits[DatasetSplit.TRAIN]) == 3
-        assert len(splits[DatasetSplit.VAL]) == 1
-        assert len(splits[DatasetSplit.TEST]) == 1
-
-        # Verify records are correctly assigned
-        train_record = splits[DatasetSplit.TRAIN][0]
-        assert train_record.stem == "test_image_0"
-        val_record = splits[DatasetSplit.VAL][0]
-        assert val_record.stem == "test_image_5"
-        test_record = splits[DatasetSplit.TEST][0]
-        assert test_record.stem == "test_image_7"
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_success_empty_dataset(self, mock_get_files, tmp_path):
-        """Test build_dataset with empty dataset (no files)."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        mock_get_files.side_effect = [[], []]
-
-        splitter = self._get_splitter()
-        splits = build_dataset(dataset_path, splitter)
-
-        assert isinstance(splits, dict)
-        assert DatasetSplit.TRAIN in splits
-        assert DatasetSplit.VAL in splits
-        assert DatasetSplit.TEST in splits
-        assert len(splits[DatasetSplit.TRAIN]) == 0
-        assert len(splits[DatasetSplit.VAL]) == 0
-        assert len(splits[DatasetSplit.TEST]) == 0
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_returns_correct_structure(self, mock_get_files, tmp_path):
-        """Test that build_dataset returns the correct dictionary structure."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        image_path = dataset_path / "test_image_0.png"
-        annotation_path = dataset_path / "test_image_0.xml"
-
-        mock_get_files.side_effect = [[image_path], [annotation_path]]
-
-        splitter = self._get_splitter()
-        splits = build_dataset(dataset_path, splitter)
-
-        # Verify structure
-        assert isinstance(splits, dict)
-        assert len(splits) == 3
-        assert all(isinstance(key, DatasetSplit) for key in splits.keys())
-        assert all(isinstance(value, list) for value in splits.values())
+    assert tasks == {"task_123"}
 
 
-class TestBuildDatasetErrors:
-    """Tests for build_dataset function - error cases."""
+def test_plan_dataset_integrates_splitter_and_layout(record_factory):
+    records = [
+        record_factory(stem="x"),
+        record_factory(stem="y"),
+    ]
+    splitter = StaticSplitter(
+        {
+            "x": DatasetSplit.TRAIN,
+            "y": DatasetSplit.VAL,
+        }
+    )
 
-    def _get_splitter(self):
-        """Helper to create a splitter with the expected configuration."""
-        policy = RatioSplitPolicy(train=0.75, val=0.15, test=0.10)
-        return HashSplitter(policy=policy, seed=42)
+    layout = DatasetLayout(root_dir=Path("data"))
+    tasks = ["task_123"]
 
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_duplicate_images(self, mock_get_files, tmp_path):
-        """Test that duplicate images raise DatasetBuildError."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
+    plan = plan_dataset(
+        records=records,
+        tasks=tasks,
+        layout=layout,
+        splitter=splitter,
+    )
 
-        image_path = dataset_path / "test_image_0.png"
-        # Simulate duplicate by returning the same path twice
-        mock_get_files.side_effect = [
-            [image_path, image_path],  # Duplicate PNG files
-            [dataset_path / "test_image_0.xml"],
-        ]
+    assert plan.tasks == tasks
 
-        splitter = self._get_splitter()
-        with pytest.raises(DatasetBuildError, match="Duplicate images found"):
-            build_dataset(dataset_path, splitter)
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_duplicate_annotations(self, mock_get_files, tmp_path):
-        """Test that duplicate annotations raise DatasetBuildError."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        annotation_path = dataset_path / "test_image_0.xml"
-        # Simulate duplicate by returning the same path twice
-        mock_get_files.side_effect = [
-            [dataset_path / "test_image_0.png"],
-            [annotation_path, annotation_path],  # Duplicate XML files
-        ]
-
-        splitter = self._get_splitter()
-        with pytest.raises(DatasetBuildError, match="Duplicate annotations found"):
-            build_dataset(dataset_path, splitter)
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_missing_annotations(self, mock_get_files, tmp_path):
-        """Test that missing annotations raise DatasetBuildError."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        mock_get_files.side_effect = [
-            [
-                dataset_path / "test_image_0.png",
-                dataset_path / "test_image_3.png",
-            ],  # Two images
-            [dataset_path / "test_image_0.xml"],  # Only one annotation
-        ]
-
-        splitter = self._get_splitter()
-        with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path, splitter)
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_missing_images(self, mock_get_files, tmp_path):
-        """Test that missing images raise DatasetBuildError."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        mock_get_files.side_effect = [
-            [dataset_path / "test_image_0.png"],  # Only one image
-            [
-                dataset_path / "test_image_0.xml",
-                dataset_path / "test_image_3.xml",
-            ],  # Two annotations
-        ]
-
-        splitter = self._get_splitter()
-        with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path, splitter)
-
-    @patch("pokedata.dataset_build.pv.get_files")
-    def test_build_dataset_name_mismatch(self, mock_get_files, tmp_path):
-        """Test that mismatched image/annotation names raise DatasetBuildError."""
-        dataset_path = tmp_path / "dataset"
-        dataset_path.mkdir()
-
-        # Create paths where stems don't match
-        # This will trigger the "Mismatched images/annotations" error
-        # because the stems are different, so they won't match in the dictionary keys
-        image_path = dataset_path / "test_image_0.png"
-        annotation_path = dataset_path / "test_image_3.xml"
-
-        mock_get_files.side_effect = [
-            [image_path],
-            [annotation_path],
-        ]
-
-        splitter = self._get_splitter()
-        with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
-            build_dataset(dataset_path, splitter)
+    copy = plan.record_copies[0]
+    assert copy.dst_image == layout.records / records[0].image_path.name
+    assert copy.split == DatasetSplit.TRAIN
+    copy = plan.record_copies[1]
+    assert copy.dst_image == layout.records / records[1].image_path.name
+    assert copy.split == DatasetSplit.VAL
 
 
-class TestRecord:
-    """Tests for Record dataclass."""
+def test_execute_dataset_plan_copies_files_and_writes_splits(tmp_path):
+    layout = DatasetLayout(root_dir=tmp_path)
 
-    def test_record_creation(self, tmp_path):
-        """Test that Record can be created with correct fields."""
-        image_path = tmp_path / "test_image_0.png"
-        annotation_path = tmp_path / "test_image_0.xml"
-        stem = "test_image_0"
+    cvat_raw = tmp_path / "cvat_raw"
+    cvat_raw.mkdir()
 
-        record = Record(
-            image_path=image_path, annotation_path=annotation_path, stem=stem
-        )
+    img = cvat_raw / "a.png"
+    ann = cvat_raw / "a.xml"
+    img.write_bytes(b"image")
+    ann.write_text("<xml />")
 
-        assert record.image_path == image_path
-        assert record.annotation_path == annotation_path
-        assert record.stem == stem
+    plan = DatasetPlan(
+        layout=layout,
+        tasks=["task_1"],
+        record_copies=[
+            RecordCopy(
+                stem="a",
+                src_image=img,
+                src_annotation=ann,
+                dst_image=layout.records / "a.png",
+                dst_annotation=layout.records / "a.xml",
+                split=DatasetSplit.TRAIN,
+            )
+        ],
+    )
+
+    result = execute_dataset_plan(plan)
+
+    assert result == layout.canonical
+
+    assert (layout.records / "a.png").exists()
+    assert (layout.records / "a.xml").exists()
+
+    tasks_file = layout.canonical / "tasks.txt"
+    assert tasks_file.exists()
+    assert tasks_file.read_text().strip() == "task_1"
+
+    train_file = layout.splits / "train.txt"
+    val_file = layout.splits / "val.txt"
+    test_file = layout.splits / "test.txt"
+
+    assert train_file.exists()
+    assert train_file.read_text().strip() == "a"
+    # empty splits still exist
+    assert val_file.exists()
+    assert test_file.exists()
 
 
-class TestDatasetBuildError:
-    """Tests for DatasetBuildError exception."""
+def test_build_dataset_creates_canonical_dataset(tmp_path):
+    layout = DatasetLayout(root_dir=tmp_path)
 
-    def test_dataset_build_error_is_exception(self):
-        """Test that DatasetBuildError is an Exception."""
-        assert issubclass(DatasetBuildError, Exception)
+    # layout.cvat_raw / <task_name> / files
+    task_dir = layout.cvat_raw / "task_123"
+    task_dir.mkdir(parents=True)
 
-    def test_dataset_build_error_can_be_raised(self):
-        """Test that DatasetBuildError can be raised and caught."""
-        with pytest.raises(DatasetBuildError):
-            raise DatasetBuildError("Test error")
+    (task_dir / "x.png").write_bytes(b"x")
+    (task_dir / "x.xml").write_text("<xml />")
 
-    def test_dataset_build_error_message(self):
-        """Test that DatasetBuildError preserves error message."""
-        error_msg = "Custom error message"
-        with pytest.raises(DatasetBuildError, match=error_msg):
-            raise DatasetBuildError(error_msg)
+    splitter = StaticSplitter({"x": DatasetSplit.TRAIN})
+
+    result = build_dataset(layout, splitter)
+
+    assert result == layout.canonical
+    assert result.exists()
+
+    assert layout.records.exists()
+    assert layout.splits.exists()
+
+    assert (layout.records / "x.png").exists()
+    assert (layout.records / "x.xml").exists()
+
+    tasks_file = layout.canonical / "tasks.txt"
+    assert tasks_file.exists()
+    assert tasks_file.read_text().strip() == "task_123"
+
+    train_file = layout.splits / "train.txt"
+    assert train_file.exists()
+    assert train_file.read_text().strip() == "x"
 
 
-class TestDatasetSplit:
-    """Tests for DatasetSplit enum."""
+def test_build_dataset_refuses_non_empty_canonical_dir(tmp_path):
+    layout = DatasetLayout(root_dir=tmp_path)
 
-    def test_dataset_split_values(self):
-        """Test that DatasetSplit enum has correct values."""
-        assert DatasetSplit.TRAIN.value == "train"
-        assert DatasetSplit.VAL.value == "val"
-        assert DatasetSplit.TEST.value == "test"
+    layout.canonical.mkdir(parents=True)
+    (layout.canonical / "junk.txt").write_text("nope")
 
-    def test_dataset_split_all_values_present(self):
-        """Test that all expected DatasetSplit values are present."""
-        expected_values = {"train", "val", "test"}
-        actual_values = {split.value for split in DatasetSplit}
-        assert actual_values == expected_values
+    with pytest.raises(DatasetBuildError):
+        build_dataset(layout, splitter=None)

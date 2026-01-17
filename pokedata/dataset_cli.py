@@ -5,7 +5,7 @@ from loguru import logger
 import typer
 from pokedata.dataset_build import build_dataset, delete_dataset
 
-from pokedata.dataset_splits import HashSplitter, RatioSplitPolicy
+from pokedata.dataset_splits import CertIdSplitter, RatioSplitPolicy
 
 dataset_app = typer.Typer(help="Dataset operations")
 
@@ -31,7 +31,7 @@ def rebuild(ctx: typer.Context) -> None:
         val=splits["val"],
         test=splits["test"],
     )
-    splitter = HashSplitter(split_policy, seed=splits["seed"])
+    splitter = CertIdSplitter(split_policy, seed=splits["seed"])
 
     logger.info(f"Building dataset {dataset_layout.canonical}")
     build_dataset(dataset_layout=dataset_layout, splitter=splitter)

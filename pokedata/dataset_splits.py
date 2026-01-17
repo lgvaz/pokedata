@@ -2,9 +2,20 @@ from dataclasses import dataclass
 from enum import Enum
 from abc import ABC, abstractmethod
 import hashlib
-from typing import Dict, List
+import re
+from typing import Dict, List, Tuple, TypeAlias
 
 from pokedata.record import Record
+
+__all__ = [
+    "DatasetSplit",
+    "SplitScore",
+    "SplitPolicy",
+    "RatioSplitPolicy",
+    "HashSplitter",
+    "CertIdSplitter",
+    "extract_card_identity",
+]
 
 
 class DatasetSplit(Enum):
@@ -56,11 +67,14 @@ class RatioSplitPolicy(SplitPolicy):
         raise RuntimeError("Unreachable")
 
 
+SplitMap: TypeAlias = Dict[DatasetSplit, List[Record]]
+
+
 class Splitter(ABC):
     @abstractmethod
     def split(self, record: Record) -> DatasetSplit: ...
 
-    def split_records(self, records: List[Record]) -> Dict[DatasetSplit, List[Record]]:
+    def split_records(self, records: List[Record]) -> SplitMap:
         splits = {
             split: [r for r in records if self.split(r) == split]
             for split in DatasetSplit
@@ -71,6 +85,19 @@ class Splitter(ABC):
                 f"{sum(len(split_records) for split_records in splits.values())} != {len(records)}"
             )
         return splits
+
+
+class StaticSplitter(Splitter):
+    """A splitter that splits records into dataset splits based on a mapping of stems to splits."""
+
+    def __init__(self, mapping: Dict[str, DatasetSplit]):
+        self._mapping = mapping
+
+    def split(self, record: Record) -> DatasetSplit:
+        try:
+            return self._mapping[record.stem]
+        except KeyError:
+            raise KeyError(f"No split mapping for record with stem {record.stem}")
 
 
 def compute_first_hash_byte(stem: str, seed: int) -> int:
@@ -92,4 +119,36 @@ class HashSplitter(Splitter):
 
     def split(self, record: Record) -> DatasetSplit:
         split_score = compute_hash_score(record.stem, self.seed)
+        return self.policy.split(split_score)
+
+
+@dataclass(frozen=True)
+class CardIdentity:
+    order_id: str
+    certificate_id: str
+    orientation: str
+
+
+def extract_card_identity(stem: str) -> CardIdentity:
+    """Extracts order ID, certificate ID, and orientation from a given filename."""
+    pattern = r"^(RG\d{9})(?=\D).*-\+(\d{8})-\+(front|back)_laser$"
+    match = re.match(pattern, stem)
+    try:
+        return CardIdentity(
+            order_id=match.group(1),
+            certificate_id=match.group(2),
+            orientation=match.group(3),
+        )
+    except:
+        raise ValueError(f"Failed to extract from {stem}")
+
+
+class CertIdSplitter(Splitter):
+    def __init__(self, policy: SplitPolicy, seed: int):
+        self.seed = seed
+        self.policy = policy
+
+    def split(self, record: Record) -> DatasetSplit:
+        card_identity = extract_card_identity(record.stem)
+        split_score = compute_hash_score(card_identity.certificate_id, self.seed)
         return self.policy.split(split_score)

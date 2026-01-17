@@ -1,14 +1,15 @@
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
-from typing import Dict, List, Set, Tuple, TypeAlias
+from typing import List, Set, Tuple, TypeAlias
 from loguru import logger
 import polvo as pv
 
 from pokedata.dataset_layout import DatasetLayout
-from pokedata.dataset_splits import DatasetSplit, Splitter
+from pokedata.dataset_splits import DatasetSplit, SplitMap, Splitter
 from pokedata.record import Record
 
-__all__ = ["DatasetBuildError", "build_dataset"]
+__all__ = ["DatasetBuildError", "build_dataset", "plan_dataset", "execute_dataset_plan"]
 
 
 class DatasetBuildError(Exception):
@@ -58,7 +59,7 @@ def records_from_cvat_raw(dataset_path: Path) -> Tuple[List[Record], Set[CvatTas
             stem=stem,
         )
         records.append(record)
-        tasks.add(image_path.parent.parent.name)
+        tasks.add(image_path.parent.name)
 
     return records, tasks
 
@@ -67,54 +68,87 @@ def delete_dataset(dataset_layout: DatasetLayout) -> None:
     shutil.rmtree(dataset_layout.canonical, ignore_errors=True)
 
 
-def build_dataset(
-    dataset_layout: DatasetLayout, splitter: Splitter
-) -> Dict[DatasetSplit, List[Record]]:
-    """Build a dataset from a directory of images and annotations."""
-
-    canonical = dataset_layout.canonical
-    if canonical.exists() and any(canonical.iterdir()):
+def _ensure_empty_directory(directory: Path) -> None:
+    if directory.exists() and any(directory.iterdir()):
         raise DatasetBuildError(
-            f"Canonical dataset directory is not empty: {canonical}\n"
+            f"Directory is not empty: {directory}\n"
             "Refusing to build into a non-empty directory.\n"
-            "Delete it explicitly (`pokedata dataset clean`) or use a new dataset root."
+            "Delete it explicitly or use a new dataset root."
         )
 
-    records, tasks = records_from_cvat_raw(dataset_layout.cvat_raw)
-    canonical.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Found {len(tasks)} tasks")
-    pv.save_txt("\n".join(tasks), dataset_layout.canonical / "tasks.txt")
+@dataclass(frozen=True)
+class RecordCopy:
+    stem: str
+    src_image: Path
+    src_annotation: Path
+    dst_image: Path
+    dst_annotation: Path
+    split: DatasetSplit
 
-    logger.info(f"Found {len(records)} records")
-    splits = splitter.split_records(records)
+
+@dataclass(frozen=True)
+class DatasetPlan:
+    layout: DatasetLayout
+    tasks: list[str]
+    record_copies: list[RecordCopy]
+
+
+def plan_dataset(
+    records: list[Record],
+    tasks: list[str],
+    layout: DatasetLayout,
+    splitter: Splitter,
+) -> DatasetPlan:
+    """Plan a dataset build."""
+    record_copies = []
+    for record in records:
+        record_copies.append(
+            RecordCopy(
+                stem=record.stem,
+                src_image=record.image_path,
+                src_annotation=record.annotation_path,
+                dst_image=layout.records / record.image_path.name,
+                dst_annotation=layout.records / record.annotation_path.name,
+                split=splitter.split(record),
+            )
+        )
+    assert len(record_copies) == len(set(record_copies))
+    return DatasetPlan(layout=layout, tasks=tasks, record_copies=record_copies)
+
+
+def execute_dataset_plan(plan: DatasetPlan) -> Path:
+    """Execute a dataset plan."""
+    plan.layout.canonical.mkdir(parents=True)
+    logger.info(f"Found {len(plan.tasks)} tasks")
+    pv.save_txt("\n".join(plan.tasks), plan.layout.canonical / "tasks.txt")
+
+    logger.info(
+        f"Copying {len(plan.record_copies)} records to {plan.layout.records.absolute}"
+    )
+    plan.layout.records.mkdir()
+    splits = {split: [] for split in DatasetSplit}
+    for record_copy in pv.pbar(plan.record_copies):
+        shutil.copy(record_copy.src_image.absolute(), record_copy.dst_image.absolute())
+        shutil.copy(
+            record_copy.src_annotation.absolute(), record_copy.dst_annotation.absolute()
+        )
+        splits[record_copy.split].append(record_copy)
+
+    plan.layout.splits.mkdir()
     for split, split_records in splits.items():
         logger.info(f"{split}: {len(split_records)} records")
+        split_path = plan.layout.splits / f"{split.value}.txt"
+        pv.save_txt("\n".join(record.stem for record in split_records), split_path)
 
-    for split, split_records in splits.items():
-        dataset_layout.splits.mkdir(parents=True, exist_ok=True)
-        split_path = dataset_layout.splits / f"{split.value}.txt"
-        logger.info(f"Writing {split.value} split to {split_path}")
-        pv.save_txt(
-            "\n".join(record.image_path.stem for record in split_records), split_path
-        )
-
-    logger.info(f"Copying {len(records)} records to output directory")
-    dataset_layout.records.mkdir(parents=True, exist_ok=True)
-    for record in pv.pbar(records):
-        copy_record_to_directory(record, dataset_layout.records)
+    return plan.layout.canonical
 
 
-def copy_record_to_directory(record: Record, output_dir: Path) -> Record:
-    new_image_path = output_dir / record.image_path.name
-    new_annotation_path = output_dir / record.annotation_path.name
+def build_dataset(dataset_layout: DatasetLayout, splitter: Splitter) -> Path:
+    """Build a dataset from a directory of images and annotations."""
 
-    shutil.copy(record.image_path, new_image_path)
-    shutil.copy(record.annotation_path, new_annotation_path)
+    _ensure_empty_directory(dataset_layout.canonical)
 
-    new_record = Record(
-        image_path=new_image_path,
-        annotation_path=new_annotation_path,
-        stem=record.stem,
-    )
-    return new_record
+    records, tasks = records_from_cvat_raw(dataset_layout.cvat_raw)
+    plan = plan_dataset(records, tasks, dataset_layout, splitter)
+    return execute_dataset_plan(plan)
