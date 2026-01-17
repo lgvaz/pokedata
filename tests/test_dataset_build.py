@@ -7,7 +7,7 @@ from pokedata.dataset_build import (
     build_dataset,
     plan_dataset,
     DatasetPlan,
-    RecordCopy,
+    RecordPlan,
     execute_dataset_plan,
     records_from_cvat_raw,
 )
@@ -31,6 +31,47 @@ def test_records_from_cvat_raw_single_task(tmp_path):
     assert records[0].annotation_path.name == "x.xml"
 
     assert tasks == {"task_123"}
+
+
+def test_records_from_cvat_raw_fails_on_duplicate_stems_across_tasks(tmp_path):
+    # TODO: Implement checking of same stem in different tasks. Should it error out here or in build_dataset?
+    cvat_raw = tmp_path / "cvat_raw"
+
+    for task in ["task_1", "task_2"]:
+        task_dir = cvat_raw / task
+        task_dir.mkdir(parents=True)
+        (task_dir / "x.png").write_bytes(b"x")
+        (task_dir / "x.xml").write_text("<xml />")
+
+    with pytest.raises(DatasetBuildError):
+        records_from_cvat_raw(cvat_raw)
+
+
+def test_records_from_cvat_raw_fails_when_annotation_is_missing(tmp_path):
+    cvat_raw = tmp_path / "cvat_raw"
+    task_dir = cvat_raw / "task_1"
+    task_dir.mkdir(parents=True)
+
+    # image without annotation
+    (task_dir / "x.png").write_bytes(b"x")
+
+    with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
+        records_from_cvat_raw(cvat_raw)
+
+
+def test_records_from_cvat_raw_fails_on_mixed_mismatch(tmp_path):
+    cvat_raw = tmp_path / "cvat_raw"
+    task_dir = cvat_raw / "task_1"
+    task_dir.mkdir(parents=True)
+
+    # image with no annotation
+    (task_dir / "a.png").write_bytes(b"a")
+
+    # annotation with no image
+    (task_dir / "b.xml").write_text("<xml />")
+
+    with pytest.raises(DatasetBuildError, match="Mismatched images/annotations"):
+        records_from_cvat_raw(cvat_raw)
 
 
 def test_plan_dataset_integrates_splitter_and_layout(record_factory):
@@ -80,7 +121,7 @@ def test_execute_dataset_plan_copies_files_and_writes_splits(tmp_path):
         layout=layout,
         tasks=["task_1"],
         record_copies=[
-            RecordCopy(
+            RecordPlan(
                 stem="a",
                 src_image=img,
                 src_annotation=ann,

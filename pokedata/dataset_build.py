@@ -78,7 +78,7 @@ def _ensure_empty_directory(directory: Path) -> None:
 
 
 @dataclass(frozen=True)
-class RecordCopy:
+class RecordPlan:
     stem: str
     src_image: Path
     src_annotation: Path
@@ -91,7 +91,7 @@ class RecordCopy:
 class DatasetPlan:
     layout: DatasetLayout
     tasks: list[str]
-    record_copies: list[RecordCopy]
+    record_copies: list[RecordPlan]
 
 
 def plan_dataset(
@@ -104,7 +104,7 @@ def plan_dataset(
     record_copies = []
     for record in records:
         record_copies.append(
-            RecordCopy(
+            RecordPlan(
                 stem=record.stem,
                 src_image=record.image_path,
                 src_annotation=record.annotation_path,

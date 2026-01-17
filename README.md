@@ -15,6 +15,6 @@ pip install -e .
 
 ```
 Record        → source world
-RecordCopy   → canonical world
+RecordPlan   → plans transition to canonical world
 DatasetPlan  → immutable transition artifact
 ```
