@@ -17,7 +17,7 @@ from pokedata.dataset_splits import DatasetSplit, StaticSplitter
 
 def test_records_from_cvat_raw_single_task(tmp_path):
     cvat_raw = tmp_path / "cvat_raw"
-    task_dir = cvat_raw / "task_123"
+    task_dir = cvat_raw / "task_123/default"
     task_dir.mkdir(parents=True)
 
     (task_dir / "x.png").write_bytes(b"x")
@@ -33,12 +33,43 @@ def test_records_from_cvat_raw_single_task(tmp_path):
     assert tasks == {"task_123"}
 
 
+def test_records_from_cvat_raw_multi_task(tmp_path):
+    cvat_raw = tmp_path / "cvat_raw"
+
+    task_dir_1 = cvat_raw / "task_123/default"
+    task_dir_1.mkdir(parents=True)
+    (task_dir_1 / "x.png").write_bytes(b"x")
+    (task_dir_1 / "x.xml").write_text("<xml />")
+
+    task_dir_2 = cvat_raw / "task_456/default"
+    task_dir_2.mkdir(parents=True)
+    (task_dir_2 / "y.png").write_bytes(b"y")
+    (task_dir_2 / "y.xml").write_text("<xml />")
+
+    records, tasks = records_from_cvat_raw(cvat_raw)
+
+    assert len(records) == 2
+    assert set(record.stem for record in records) == {"x", "y"}
+    assert tasks == {"task_123", "task_456"}
+
+
+def test_records_from_cvat_invalid_folder_structure(tmp_path):
+    cvat_raw = tmp_path / "cvat_raw"
+    task_dir = cvat_raw / "task_123"
+    task_dir.mkdir(parents=True)
+    (task_dir / "x.png").write_bytes(b"x")
+    (task_dir / "x.xml").write_text("<xml />")
+
+    with pytest.raises(DatasetBuildError, match="Invalid task name"):
+        records_from_cvat_raw(cvat_raw)
+
+
 def test_records_from_cvat_raw_fails_on_duplicate_stems_across_tasks(tmp_path):
     # TODO: Implement checking of same stem in different tasks. Should it error out here or in build_dataset?
     cvat_raw = tmp_path / "cvat_raw"
 
     for task in ["task_1", "task_2"]:
-        task_dir = cvat_raw / task
+        task_dir = cvat_raw / task / "default"
         task_dir.mkdir(parents=True)
         (task_dir / "x.png").write_bytes(b"x")
         (task_dir / "x.xml").write_text("<xml />")
@@ -112,7 +143,7 @@ def test_plan_dataset_integrates_splitter_and_layout(record_factory):
     )
 
     layout = DatasetLayout(root_dir=Path("data"))
-    tasks = ["task_123"]
+    tasks = ["task_123", "task_456"]
 
     plan = plan_dataset(
         records=records,
@@ -183,7 +214,7 @@ def test_build_dataset_creates_canonical_dataset(tmp_path):
     layout = DatasetLayout(root_dir=tmp_path)
 
     # layout.cvat_raw / <task_name> / files
-    task_dir = layout.cvat_raw / "task_123"
+    task_dir = layout.cvat_raw / "task_123/default"
     task_dir.mkdir(parents=True)
 
     (task_dir / "x.png").write_bytes(b"x")

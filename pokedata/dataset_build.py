@@ -67,7 +67,9 @@ def records_from_cvat_raw(dataset_path: Path) -> Tuple[List[Record], Set[CvatTas
             annotation_path=annotation_path,
         )
         records.append(record)
-        tasks.add(image_path.parent.name)
+        if not (task_name := image_path.parent.parent.name).startswith("task_"):
+            raise DatasetBuildError(f"Invalid task name: {task_name} for {image_path}")
+        tasks.add(task_name)
 
     return records, tasks
 
@@ -132,7 +134,7 @@ def execute_dataset_plan(plan: DatasetPlan) -> Path:
     pv.save_txt("\n".join(plan.tasks), plan.layout.canonical / "tasks.txt")
 
     logger.info(
-        f"Copying {len(plan.record_copies)} records to {plan.layout.records.absolute}"
+        f"Copying {len(plan.record_copies)} records to {plan.layout.records.absolute()}"
     )
     plan.layout.records.mkdir()
     splits = {split: [] for split in DatasetSplit}
