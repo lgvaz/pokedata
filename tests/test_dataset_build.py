@@ -47,6 +47,31 @@ def test_records_from_cvat_raw_fails_on_duplicate_stems_across_tasks(tmp_path):
         records_from_cvat_raw(cvat_raw)
 
 
+def test_records_from_cvat_raw_reports_missing_images_and_annotations_correctly(
+    tmp_path,
+):
+    cvat_raw = tmp_path / "cvat_raw"
+    task_dir = cvat_raw / "task_1"
+    task_dir.mkdir(parents=True)
+
+    # image with annotation
+    (task_dir / "ok.png").write_bytes(b"x")
+    (task_dir / "ok.xml").write_text("<xml />")
+    # image WITHOUT annotation  -> missing annotation
+    (task_dir / "img_only.png").write_bytes(b"x")
+    # annotation WITHOUT image -> missing image
+    (task_dir / "ann_only.xml").write_text("<xml />")
+
+    with pytest.raises(DatasetBuildError) as exc:
+        records_from_cvat_raw(cvat_raw)
+
+    msg = str(exc.value)
+    assert "Missing images" in msg
+    assert "ann_only" in msg
+    assert "Missing annotations" in msg
+    assert "img_only" in msg
+
+
 def test_records_from_cvat_raw_fails_when_annotation_is_missing(tmp_path):
     cvat_raw = tmp_path / "cvat_raw"
     task_dir = cvat_raw / "task_1"

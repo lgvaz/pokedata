@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 from pokedata.dataset_splits import (
@@ -98,11 +99,21 @@ def test_hash_splitter():
     policy = RatioSplitPolicy(train=0.8, val=0.10, test=0.10)
     splitter = HashSplitter(policy=policy, seed=42)
 
-    record_0 = Record(image_path=None, annotation_path=None, stem="test_image_0")
-    record_3 = Record(image_path=None, annotation_path=None, stem="test_image_3")
-    record_4 = Record(image_path=None, annotation_path=None, stem="test_image_4")
-    record_5 = Record(image_path=None, annotation_path=None, stem="test_image_5")
-    record_7 = Record(image_path=None, annotation_path=None, stem="test_image_7")
+    record_0 = Record(
+        image_path=Path("test_image_0.png"), annotation_path=Path("test_image_0.xml")
+    )
+    record_3 = Record(
+        image_path=Path("test_image_3.png"), annotation_path=Path("test_image_3.xml")
+    )
+    record_4 = Record(
+        image_path=Path("test_image_4.png"), annotation_path=Path("test_image_4.xml")
+    )
+    record_5 = Record(
+        image_path=Path("test_image_5.png"), annotation_path=Path("test_image_5.xml")
+    )
+    record_7 = Record(
+        image_path=Path("test_image_7.png"), annotation_path=Path("test_image_7.xml")
+    )
 
     assert splitter.split(record_0) == DatasetSplit.TRAIN
     assert splitter.split(record_3) == DatasetSplit.TRAIN

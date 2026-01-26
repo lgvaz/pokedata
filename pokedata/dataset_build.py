@@ -1,7 +1,8 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
-from typing import List, Set, Tuple, TypeAlias
+from typing import Counter, List, Set, Tuple, TypeAlias
 from loguru import logger
 import polvo as pv
 
@@ -21,21 +22,29 @@ class DatasetBuildError(Exception):
 CvatTask: TypeAlias = str
 
 
+def find_duplicate_filenames(paths: List[Path]) -> Set[Path]:
+    by_name: dict[str, list[Path]] = defaultdict(list)
+
+    for path in paths:
+        by_name[path.name].append(path)
+
+    return [paths for paths in by_name.values() if len(paths) > 1]
+
+
 def records_from_cvat_raw(dataset_path: Path) -> Tuple[List[Record], Set[CvatTask]]:
     image_paths = pv.get_files(dataset_path, extensions=[".png"])
     annotation_paths = pv.get_files(dataset_path, extensions=[".xml"])
 
-    # assert there are no duplicate stems
-    if len(image_paths) != len(set(image_paths)):
-        raise DatasetBuildError(f"Duplicate images found in {dataset_path}")
-    if len(annotation_paths) != len(set(annotation_paths)):
-        raise DatasetBuildError(f"Duplicate annotations found in {dataset_path}")
+    if duplicate_filenames := find_duplicate_filenames(image_paths):
+        raise DatasetBuildError(f"Duplicate images found: {duplicate_filenames}")
+    if duplicate_filenames := find_duplicate_filenames(annotation_paths):
+        raise DatasetBuildError(f"Duplicate annotations found: {duplicate_filenames}")
 
     stem2image_path = {path.stem: path for path in image_paths}
     stem2annotation_path = {path.stem: path for path in annotation_paths}
 
     if stem2image_path.keys() != stem2annotation_path.keys():
-        missing_images = stem2image_path.keys() - stem2annotation_path.keys()
+        missing_images = stem2annotation_path.keys() - stem2image_path.keys()
         missing_annotations = stem2image_path.keys() - stem2annotation_path.keys()
         raise DatasetBuildError(
             f"Mismatched images/annotations. "
@@ -56,7 +65,6 @@ def records_from_cvat_raw(dataset_path: Path) -> Tuple[List[Record], Set[CvatTas
         record = Record(
             image_path=image_path,
             annotation_path=annotation_path,
-            stem=stem,
         )
         records.append(record)
         tasks.add(image_path.parent.name)

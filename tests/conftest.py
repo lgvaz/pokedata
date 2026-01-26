@@ -38,7 +38,6 @@ def record_factory(tmp_path):
         return Record(
             image_path=image_path,
             annotation_path=annotation_path,
-            stem=stem,
         )
 
     return _make
