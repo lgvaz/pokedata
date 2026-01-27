@@ -6,15 +6,15 @@ __all__ = ["DatasetLayout"]
 
 @dataclass(frozen=True)
 class DatasetLayout:
-    root_dir: Path
+    dataset_repo: Path
 
     @property
     def cvat_raw(self) -> Path:
-        return self.root_dir / "cvat_raw"
+        return self.dataset_repo / "cvat_raw"
 
     @property
     def canonical(self) -> Path:
-        return self.root_dir / "canonical"
+        return self.dataset_repo / "canonical"
 
     @property
     def records(self) -> Path:

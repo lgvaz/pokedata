@@ -27,16 +27,16 @@ def main(
     ctx: typer.Context,
     config_path: Path = typer.Option("config.yaml", help="Path to config file"),
     secrets_path: Path = typer.Option("secrets.yaml", help="Path to secrets file"),
-    output_dir: Optional[Path] = typer.Option(
-        None, help="Output directory (overrides config)"
+    dataset_repo: Optional[Path] = typer.Option(
+        None, help="Dataset repository directory (overrides config)"
     ),
 ) -> None:
     """Main entry point for the CLI."""
     config = load_config(config_path, secrets_path)
-    if output_dir:
-        config["datasets"]["output_dir"] = output_dir
+    if dataset_repo:
+        config["datasets"]["repository_dir"] = dataset_repo
 
-    dataset_layout = DatasetLayout(Path(config["datasets"]["output_dir"]))
+    dataset_layout = DatasetLayout(Path(config["datasets"]["repository_dir"]))
 
     ctx.obj = CLIContext(config=config, dataset_layout=dataset_layout)
 

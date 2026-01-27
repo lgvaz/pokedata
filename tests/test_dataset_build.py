@@ -142,7 +142,7 @@ def test_plan_dataset_integrates_splitter_and_layout(record_factory):
         }
     )
 
-    layout = DatasetLayout(root_dir=Path("data"))
+    layout = DatasetLayout(dataset_repo=Path("data"))
     tasks = ["task_123", "task_456"]
 
     plan = plan_dataset(
@@ -163,7 +163,7 @@ def test_plan_dataset_integrates_splitter_and_layout(record_factory):
 
 
 def test_execute_dataset_plan_copies_files_and_writes_splits(tmp_path):
-    layout = DatasetLayout(root_dir=tmp_path)
+    layout = DatasetLayout(dataset_repo=tmp_path)
 
     cvat_raw = tmp_path / "cvat_raw"
     cvat_raw.mkdir()
@@ -211,7 +211,7 @@ def test_execute_dataset_plan_copies_files_and_writes_splits(tmp_path):
 
 
 def test_build_dataset_creates_canonical_dataset(tmp_path):
-    layout = DatasetLayout(root_dir=tmp_path)
+    layout = DatasetLayout(dataset_repo=tmp_path)
 
     # layout.cvat_raw / <task_name> / files
     task_dir = layout.cvat_raw / "task_123/default"
@@ -243,7 +243,7 @@ def test_build_dataset_creates_canonical_dataset(tmp_path):
 
 
 def test_build_dataset_refuses_non_empty_canonical_dir(tmp_path):
-    layout = DatasetLayout(root_dir=tmp_path)
+    layout = DatasetLayout(dataset_repo=tmp_path)
 
     layout.canonical.mkdir(parents=True)
     (layout.canonical / "junk.txt").write_text("nope")
