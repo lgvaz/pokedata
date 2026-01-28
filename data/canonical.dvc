@@ -1,6 +1,6 @@
 outs:
-- md5: 648ff397ae83d77b26dc9d04f6145871.dir
-  size: 327968598
-  nfiles: 126
+- md5: e3704163fd3cd96e85a458a3a88a48b7.dir
+  size: 320979474
+  nfiles: 124
   hash: md5
   path: canonical
