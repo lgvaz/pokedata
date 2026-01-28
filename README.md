@@ -21,6 +21,24 @@ DatasetPlan  → immutable transition artifact
 
 ## Instructions
 
+### Updating DVC dataset
+
+Add changes and push:
+```bash
+dvc add data/canonical
+dvc push
+```
+
+Commit push:
+```bash
+git commit -m "data releases v0.2.0"
+git push
+```
+
+**Release via github UI**
+Don't forget to add what changed to the notes
+
+
 ### Creating a new dataset from scratch
 
 Initialiaze DVC:
