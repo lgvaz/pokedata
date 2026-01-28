@@ -1,4 +1,5 @@
 [core]
     remote = storage
+    autostage = true
 ['remote "storage"']
     url = s3://ags-ai-cards-training-dataset/dvcstore
