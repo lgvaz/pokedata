@@ -34,9 +34,9 @@ def main(
     """Main entry point for the CLI."""
     config = load_config(config_path, secrets_path)
     if dataset_repo:
-        config["datasets"]["repository_dir"] = dataset_repo
+        config["datasets"]["dataset_repo"] = dataset_repo
 
-    dataset_layout = DatasetLayout(Path(config["datasets"]["repository_dir"]))
+    dataset_layout = DatasetLayout(Path(config["datasets"]["dataset_repo"]))
 
     ctx.obj = CLIContext(config=config, dataset_layout=dataset_layout)
 
