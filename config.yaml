@@ -1,6 +1,6 @@
 # Configuration
 datasets:
-  dataset_repo: "~/git/datasets/ags-cards"
+  dataset_repo: "data"
   splits:
     seed: 42
     train: 0.8
